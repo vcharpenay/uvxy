@@ -1,0 +1,12 @@
+{
+  "dim": 1000,
+  "constraints": "uvxy",
+  "trainable_weights": true,
+  "ds": "FB15k237",
+  "epochs": 1000,
+  "patience": 10,
+  "margin": 15,
+  "lr": 1e-3,
+  "negs": 150,
+  "batch_size": 1024
+}

@@ -1,0 +1,13 @@
+{
+  "dim": 500,
+  "constraints": "uvxy",
+  "trainable_weights": true,
+  "ds": "WN18RR",
+  "epochs": 1000,
+  "patience": 3,
+  "margin": 35,
+  "lr": 1e-2,
+  "negs": 5,
+  "batch_size": 512
+}
+

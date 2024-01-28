@@ -1,0 +1,2 @@
+pykeen>=1.9.0
+more-itertools>=4.3 # otherwise, error when pykeen.nn imports 'last'
