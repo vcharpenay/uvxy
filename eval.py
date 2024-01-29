@@ -1,26 +1,26 @@
 from pykeen.pipeline import pipeline
-from pykeen.hpo import hpo_pipeline
-from pykeen.losses import MarginRankingLoss, BCEWithLogitsLoss, BCEAfterSigmoidLoss, NSSALoss, SoftplusLoss, CrossEntropyLoss
-from pykeen.models import TransE, DistMult, RotatE, TuckER
-from pykeen.datasets import FB15k237, WN18RR, Nations
-from pykeen.training import SLCWATrainingLoop, LCWATrainingLoop
+from pykeen.losses import NSSALoss
+from pykeen.datasets import Nations
+from pykeen.training import SLCWATrainingLoop
 from torch.optim import Adam
 
 from uvxy import UVXY
 
-from os.path import exists
+from os.path import exists, basename, splitext
 from argparse import ArgumentParser
 from json import load
 from datetime import datetime
 
 parser = ArgumentParser()
-parser.add_argument("config_name")
+parser.add_argument("config_path")
 args = parser.parse_args()
 
-config_name = args.config_name
-config_path = config_name + ".json"
+config_path = args.config_path
+config_name = splitext(basename(config_path))[0]
 
 config = load(open(config_path, "r")) if exists(config_path) else {}
+
+print(f"Found configuration {config_name}: {config}")
 
 def with_default(name, default):
     return config[name] if name in config else default
@@ -69,4 +69,7 @@ result = pipeline(
     stopper_kwargs=dict(patience=patience,relative_delta=0.005,frequency=10),
 )
 
-result.save_to_directory(f"results/{config_name}/{ts}")
+result_path = f"results/{config_name}/{ts}"
+result.save_to_directory(result_path)
+
+print(f"Evaluation results saved to folder: {result_path}")
