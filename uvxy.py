@@ -1,6 +1,9 @@
+from typing import Tuple, cast
 from pykeen.nn import Interaction, Embedding
 from pykeen.models import ERModel
+from pykeen.typing import InductiveMode, HeadRepresentation, TailRepresentation, RelationRepresentation
 from torch import FloatTensor, rand_like, randn_like, min, max, where, zeros, ones_like, zeros_like, abs, sigmoid, tensor, cat
+from torch import LongTensor
 from torch.nn.init import uniform_
 from torch.nn.functional import normalize
 from torch.cuda import is_available as is_cuda_available
@@ -224,6 +227,123 @@ class UVXY(ERModel):
             relation_representations_kwargs=r_kwargs,
             **kwargs
         )
+
+    def score_hrt(
+        self,
+        hrt_batch: LongTensor,
+        *,
+        mode: InductiveMode = None
+    ) -> FloatTensor:
+        h = hrt_batch[:, 0]
+        t = hrt_batch[:, 2]
+
+        nb_rels = hrt_batch.size(-1) - 2
+        r = hrt_batch[:, 1:-1].squeeze(-1)
+
+        h, r, t = self._get_representations(h=h, r=r, t=t, mode=mode, nb_rels=nb_rels)
+        return self.interaction.score_hrt(h=h, r=r, t=t)
+
+    def _get_representations(
+        self,
+        h: LongTensor,
+        r: LongTensor,
+        t: LongTensor,
+        *,
+        mode: InductiveMode,
+        nb_rels: int = 1
+    ) -> Tuple:
+        # TODO consider inductive mode
+
+        hr = self._get_entity_representation(h, ht="head", mode=mode)
+        tr = self._get_entity_representation(t, ht="tail", mode=mode)
+
+        rr = self._get_relation_representation(r, nb_rels=nb_rels)
+
+        return cast(
+            Tuple[HeadRepresentation, RelationRepresentation, TailRepresentation],
+            tuple(x[0] if len(x) == 1 else x for x in (hr, rr, tr)),
+        )
+    
+    def _get_entity_representation(self, e: LongTensor, *, ht: str, mode: InductiveMode):
+        if ht == "head":
+            indices = self.interaction.head_indices
+        elif ht == "tail":
+            indices = self.interaction.tail_indices
+        else:
+            raise ValueError(f"expected 'head' or 'tail', got {ht}")
+
+        representations = self._get_entity_representations_from_inductive_mode(mode=mode)
+        representations = [representations[i] for i in indices()]
+
+        return [
+            representation(indices=e)
+            for representation in representations
+        ]
+
+    def _get_relation_representation(self, r: LongTensor, *, nb_rels=1):
+        if nb_rels == 1:
+            return [
+                representation(r)
+                for representation in self.relation_representations
+            ]
+
+        if self.with_attention_weights:
+            raise ValueError("Composition with attention weights not supported")
+
+        representation = self.relation_representations[0]
+        octa1 = representation(r[:,0])
+
+        # compose relations
+        for i in range(1, nb_rels):
+            octa2 = representation(r[:,i])
+            octa1 = self._compose(octa1, octa2)
+
+        return octa1
+
+    def _compose(self, octa1, octa2):
+        cx1, cy1, cu1, cv1, dx1, dy1, du1, dv1 = self._split_octa(octa1)
+        cx2, cy2, cu2, cv2, dx2, dy2, du2, dv2 = self._split_octa(octa2)
+
+        xmin1 = cx1 - dx1
+        xmax1 = cx1 + dx1
+        ymin1 = cy1 - dy1
+        ymax1 = cy1 + dy1
+        umin1 = cu1 - du1
+        umax1 = cu1 + du1
+        vmin1 = cv1 - dv1
+        vmax1 = cv1 + dv1
+
+        xmin2 = cx2 - dx2
+        xmax2 = cx2 + dx2
+        ymin2 = cy2 - dy2
+        ymax2 = cy2 + dy2
+        umin2 = cu2 - du2
+        umax2 = cu2 + du2
+        vmin2 = cv2 - dv2
+        vmax2 = cv2 + dv2
+
+        xmin3 = max(xmin1, max(xmin2 - umax1, vmin1 - xmax2))
+        xmax3 = min(xmax1, min(xmax2 - umin1, vmax1 - xmin2))
+        ymin3 = max(ymin2, max(umin2 + ymin1, vmin2 - ymax1))
+        ymax3 = min(ymax2, min(umax2 + ymax1, vmax2 - ymin1))
+        umin3 = max(ymin2 - xmax1, max(umin2 + umin1, vmin2 - vmax1))
+        umax3 = min(ymax2 - xmin1, min(umax2 + umax1, vmax2 - vmin1))
+        vmin3 = max(xmin1 + ymin2, max(umin2 + vmin1, vmin2 - umax1))
+        vmax3 = min(xmax1 + ymax2, min(umax2 + vmax1, vmax2 - umin1))
+
+        return self._merge_octa((
+            # centers
+            (xmax3 + xmin3) / 2,
+            (ymax3 + ymin3) / 2,
+            (umax3 + umin3) / 2,
+            (vmax3 + vmin3) / 2,
+            # deltas
+            (xmax3 - xmin3) / 2,
+            (ymax3 - ymin3) / 2,
+            (umax3 - umin3) / 2,
+            (vmax3 - vmin3) / 2
+            # TODO deal with lambdas?
+        ))
 
     def _split_octa(self, octa):
         octa = octa.tensor_split(8, dim=-1)

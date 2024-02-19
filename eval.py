@@ -5,6 +5,7 @@ from pykeen.training import SLCWATrainingLoop
 from torch.optim import Adam
 
 from uvxy import UVXY
+from training import PathTrainingLoop
 
 from os.path import exists, basename, splitext
 from argparse import ArgumentParser
@@ -12,13 +13,17 @@ from json import load
 from datetime import datetime
 
 parser = ArgumentParser()
-parser.add_argument("config_path")
+parser.add_argument("config_path", nargs="?")
 args = parser.parse_args()
 
 config_path = args.config_path
-config_name = splitext(basename(config_path))[0]
 
-config = load(open(config_path, "r")) if exists(config_path) else {}
+if config_path:
+    config_name = splitext(basename(config_path))[0]
+    config = load(open(config_path, "r")) if exists(config_path) else {}
+else:
+    config_name = "eval"
+    config = {}
 
 print(f"Found configuration {config_name}: {config}")
 
@@ -52,7 +57,7 @@ result = pipeline(
 
     loss=NSSALoss,
     loss_kwargs=dict(margin=margin),
-    training_loop=SLCWATrainingLoop,
+    training_loop=PathTrainingLoop,
     negative_sampler_kwargs=dict(num_negs_per_pos=negs),
     optimizer=Adam,
     optimizer_kwargs=dict(lr=lr),
