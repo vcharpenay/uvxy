@@ -119,14 +119,16 @@ class PathDataset(IterableDataset):
 
     def __getitem__(self, indices: List[int]) -> Any:
         positive_triples = self.mapped_triples[indices]
-        negative_triples, masks = self.negative_sampler.sample(positive_batch=positive_triples)
+        negative_triples, _ = self.negative_sampler.sample(positive_batch=positive_triples)
 
         if self.path_sampler:
             positive_paths = self.path_sampler.sample(positive_triples)
+            negative_paths, _ = self.negative_sampler.sample(positive_batch=positive_paths)
         else:
             positive_paths = None
+            negative_paths = None
 
-        return positive_triples, negative_triples, positive_paths, None
+        return positive_triples, negative_triples, positive_paths, negative_paths
 
     def iter_triple_ids(self) -> Iterable[List[int]]:
         yield from BatchSampler(
@@ -148,28 +150,14 @@ class PathDataset(IterableDataset):
         if nb % batch_size == 0: return int(nb)
         else: return floor(nb) if drop_last else ceil(nb)
 
-class PathTrainingLoop(TrainingLoop):
+class PathTrainingLoop(SLCWATrainingLoop):
 
     def __init__(
         self,
-        model: Model,
-        triples_factory: CoreTriplesFactory,
-        optimizer: HintOrType[Optimizer] = None,
-        optimizer_kwargs: OptionalKwargs = None,
-        lr_scheduler: HintOrType[LRScheduler] = None,
-        lr_scheduler_kwargs: OptionalKwargs = None,
-        automatic_memory_optimization: bool = True,
-        mode: InductiveMode = None,
-        result_tracker: HintOrType[ResultTracker] = None,
-        result_tracker_kwargs: OptionalKwargs = None,
-        negative_sampler: HintOrType[NegativeSampler] = None,
-        negative_sampler_kwargs: OptionalKwargs = None,
-        path_sampler: PathSampler = None
+        path_sampler: PathSampler = None,
+        **kwargs
     ) -> None:
-        super().__init__(model, triples_factory, optimizer, optimizer_kwargs, lr_scheduler, lr_scheduler_kwargs, automatic_memory_optimization, mode, result_tracker, result_tracker_kwargs)
-
-        self.negative_sampler = negative_sampler
-        self.negative_sampler_kwargs = negative_sampler_kwargs
+        super().__init__(**kwargs)
 
         self.path_sampler = path_sampler
 
@@ -226,11 +214,6 @@ class PathTrainingLoop(TrainingLoop):
         # should have already be done by NegativeSampler
         neg_triple_batch = neg_triple_batch.to(model.device)
 
-        # same for paths
-        # neg_path_shape = neg_path_batch.shape[:-1]
-        # neg_path_batch = neg_path_batch.view(-1, 4)
-        # neg_path_batch = neg_path_batch.to(model.device)
-
         # compute scores for triples
         pos_scores = model.score_hrt(pos_triple_batch, mode=mode)
         neg_scores = model.score_hrt(neg_triple_batch, mode=mode).view(*neg_triple_shape)
@@ -238,12 +221,18 @@ class PathTrainingLoop(TrainingLoop):
         # compute sccores for paths (2p)
         if pos_path_batch != None:
             pos_path_batch = pos_path_batch[start:stop]
-            # neg_path_batch = neg_path_batch[start:stop]
+            neg_path_batch = neg_path_batch[start:stop]
             
             pos_path_scores = model.score_hrt(pos_path_batch, mode=mode)
             pos_scores = cat((pos_scores, pos_path_scores))
+
+            # linearize negs for scoring (same as for triples)
+            neg_path_shape = neg_path_batch.shape[:-1]
+            neg_path_batch = neg_path_batch.view(-1, 4)
+            neg_path_batch = neg_path_batch.to(model.device)
             
-            # neg_path_scores = model.score_hrt(neg_path_batch, mode=mode).view(*neg_path_shape)
+            neg_path_scores = model.score_hrt(neg_path_batch, mode=mode).view(*neg_path_shape)
+            neg_scores = cat((neg_scores, neg_path_scores))
 
         return (
             loss.process_slcwa_scores(
@@ -255,17 +244,3 @@ class PathTrainingLoop(TrainingLoop):
             )
             + model.collect_regularization_term()
         )
-
-    def _slice_size_search(
-        self,
-        *,
-        triples_factory: CoreTriplesFactory,
-        batch_size: int,
-        sub_batch_size: int,
-        supports_sub_batching: bool
-    ) -> int:
-        raise MemoryError()
-
-    @staticmethod
-    def _get_batch_size(batch):
-        return batch[0].shape[0]

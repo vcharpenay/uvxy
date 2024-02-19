@@ -6,6 +6,7 @@ from torch.optim import Adam
 
 from uvxy import UVXY
 from paths import PathTrainingLoop, PredefinedPathSampler
+from sampling import BasicNegativeSampler
 
 from os.path import exists, basename, splitext
 from argparse import ArgumentParser
@@ -59,6 +60,7 @@ result = pipeline(
     loss_kwargs=dict(margin=margin),
     training_loop=PathTrainingLoop,
     training_loop_kwargs=dict(path_sampler=PredefinedPathSampler),
+    negative_sampler=BasicNegativeSampler,
     negative_sampler_kwargs=dict(num_negs_per_pos=negs),
     optimizer=Adam,
     optimizer_kwargs=dict(lr=lr),
