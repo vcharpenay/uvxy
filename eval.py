@@ -5,7 +5,7 @@ from pykeen.training import SLCWATrainingLoop
 from torch.optim import Adam
 
 from uvxy import UVXY
-from training import PathTrainingLoop
+from paths import PathTrainingLoop, PredefinedPathSampler
 
 from os.path import exists, basename, splitext
 from argparse import ArgumentParser
@@ -58,6 +58,7 @@ result = pipeline(
     loss=NSSALoss,
     loss_kwargs=dict(margin=margin),
     training_loop=PathTrainingLoop,
+    training_loop_kwargs=dict(path_sampler=PredefinedPathSampler),
     negative_sampler_kwargs=dict(num_negs_per_pos=negs),
     optimizer=Adam,
     optimizer_kwargs=dict(lr=lr),

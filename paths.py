@@ -14,7 +14,7 @@ from pykeen.triples import CoreTriplesFactory, TriplesFactory
 from pykeen.sampling import NegativeSampler, negative_sampler_resolver
 from pykeen.typing import EntityMapping, InductiveMode, MappedTriples, RelationMapping
 from torch.utils.data import IterableDataset
-from torch import FloatTensor, LongTensor, tensor, cat, randint
+from torch import FloatTensor, LongTensor, tensor, cat, stack, randint
 from torch.optim.optimizer import Optimizer
 from torch.utils.data import DataLoader, BatchSampler, RandomSampler
 
@@ -43,6 +43,31 @@ class PathsFactory:
         ])
 
         return PathsFactory(ps)
+    
+    @classmethod
+    def from_triples(cls, mapped_triples: LongTensor, nb_paths = None):
+        if not nb_paths:
+            nb_paths = mapped_triples.size(0)
+
+        h = mapped_triples[:,0]
+        r = mapped_triples[:,1]
+        t = mapped_triples[:,2]
+
+        paths = []
+
+        for h, r1, e in mapped_triples:
+            joins = mapped_triples[mapped_triples[:, 0] == e]
+            nb_joins = joins.size(0)
+
+            if nb_joins > 0:
+                i = randint(0, nb_joins, (1,)).item()
+                e, r2, t = joins[i]
+
+                paths.append([h, r1, r2, t])
+
+            if len(paths) > nb_paths: break
+
+        return PathsFactory(tensor(paths))
     
 class PathSampler:
 
@@ -73,7 +98,7 @@ class PathDataset(IterableDataset):
         num_relations: Optional[int] = None,
         negative_sampler: HintOrType[NegativeSampler] = None,
         negative_sampler_kwargs: OptionalKwargs = None,
-        path_sampler: PathSampler = None
+        path_sampler: HintOrType[PathSampler] = None
     ) -> None:
         self.mapped_triples = mapped_triples
         self.batch_size = batch_size
@@ -86,7 +111,9 @@ class PathDataset(IterableDataset):
             num_relations=num_relations,
         )
 
-        self.path_sampler = path_sampler
+        # TODO put in resolver
+        pf = PathsFactory.from_triples(mapped_triples)
+        self.path_sampler = path_sampler(mapped_paths=pf.mapped_paths)
 
         self.nb_batches = self._get_nb_batches(mapped_triples.size(0), batch_size, drop_last)
 
@@ -137,11 +164,14 @@ class PathTrainingLoop(TrainingLoop):
         result_tracker_kwargs: OptionalKwargs = None,
         negative_sampler: HintOrType[NegativeSampler] = None,
         negative_sampler_kwargs: OptionalKwargs = None,
+        path_sampler: PathSampler = None
     ) -> None:
         super().__init__(model, triples_factory, optimizer, optimizer_kwargs, lr_scheduler, lr_scheduler_kwargs, automatic_memory_optimization, mode, result_tracker, result_tracker_kwargs)
 
         self.negative_sampler = negative_sampler
         self.negative_sampler_kwargs = negative_sampler_kwargs
+
+        self.path_sampler = path_sampler
 
     def _create_training_data_loader(
         self,
@@ -164,6 +194,7 @@ class PathTrainingLoop(TrainingLoop):
                 drop_last=drop_last,
                 negative_sampler=self.negative_sampler,
                 negative_sampler_kwargs=self.negative_sampler_kwargs,
+                path_sampler=self.path_sampler
             ),
             # PyTorch's automatic batching is disabled (why?)
             batch_size=None,
@@ -205,7 +236,7 @@ class PathTrainingLoop(TrainingLoop):
         neg_scores = model.score_hrt(neg_triple_batch, mode=mode).view(*neg_triple_shape)
 
         # compute sccores for paths (2p)
-        if pos_path_batch:
+        if pos_path_batch != None:
             pos_path_batch = pos_path_batch[start:stop]
             # neg_path_batch = neg_path_batch[start:stop]
             

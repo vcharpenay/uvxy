@@ -235,7 +235,7 @@ class UVXY(ERModel):
         mode: InductiveMode = None
     ) -> FloatTensor:
         h = hrt_batch[:, 0]
-        t = hrt_batch[:, 2]
+        t = hrt_batch[:, -1]
 
         nb_rels = hrt_batch.size(-1) - 2
         r = hrt_batch[:, 1:-1].squeeze(-1)
