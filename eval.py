@@ -8,7 +8,7 @@ from uvxy import UVXY
 
 from os.path import exists, basename, splitext
 from argparse import ArgumentParser
-from json import load
+from json import load, dump
 from datetime import datetime
 
 parser = ArgumentParser()
@@ -33,6 +33,7 @@ ds = with_default("ds", Nations)
 epochs = with_default("epochs", 500)
 patience = with_default("patience", 3)
 margin = with_default("margin", 3)
+t = with_default("t", 1)
 lr = with_default("lr", 1e-2)
 negs = with_default("negs", 5)
 batch_size = with_default("batch_size", 256)
@@ -51,7 +52,7 @@ result = pipeline(
     dataset=ds,
 
     loss=NSSALoss,
-    loss_kwargs=dict(margin=margin),
+    loss_kwargs=dict(margin=margin,adversarial_temperature=t),
     training_loop=SLCWATrainingLoop,
     negative_sampler_kwargs=dict(num_negs_per_pos=negs),
     optimizer=Adam,
@@ -71,5 +72,7 @@ result = pipeline(
 
 result_path = f"results/{config_name}/{ts}"
 result.save_to_directory(result_path)
+
+with open(f"{result_path}/config.json", "w") as f: dump(config, f)
 
 print(f"Evaluation results saved to folder: {result_path}")

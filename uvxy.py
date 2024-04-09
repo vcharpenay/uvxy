@@ -1,9 +1,12 @@
 from pykeen.nn import Interaction, Embedding
 from pykeen.models import ERModel
 from torch import FloatTensor, rand_like, randn_like, min, max, where, zeros, ones_like, zeros_like, abs, sigmoid, tensor, cat
-from torch.nn.init import uniform_
+from torch.nn.init import xavier_uniform_
 from torch.nn.functional import normalize
 from torch.cuda import is_available as is_cuda_available
+
+def init_rand_width(d, min_width):
+    return min_width + randn_like(d).abs()
 
 def init_band_center(u):
     """
@@ -114,8 +117,12 @@ class UVXYInteraction(Interaction):
             ("e", "f",) if with_attention_weights else ("e",)
 
         self.p = p
-        self.constraint_mask = constraint_mask
         self.with_attention_weights = with_attention_weights
+
+        # TODO get device from model?
+        self.constraint_mask = \
+            [ c.cuda() for c in constraint_mask ] if is_cuda_available() \
+            else constraint_mask
 
     def _prepare_octa(self, r):
         if self.with_attention_weights: octa, a = r
@@ -186,8 +193,7 @@ class UVXY(ERModel):
 
         e_kwargs = dict(
             embedding_dim=embedding_dim,
-            initializer=uniform_,
-            initializer_kwargs=dict(a=-1,b=1),
+            initializer=xavier_uniform_
         )
 
         r_kwargs = [
@@ -241,17 +247,12 @@ class UVXY(ERModel):
         octa[2] = octa[1] - octa[0]
         octa[3] = octa[1] + octa[0]
 
-        # width with std deviation = 0.5
-        # FIXME rather expects an exp distribution starting from min_margin
-        octa[4] = max(tensor(0.1), randn_like(octa[4]) / 2)
-        octa[5] = max(tensor(0.1), randn_like(octa[5]) / 2)
-        octa[6] = max(tensor(0.1), randn_like(octa[6]) / 2)
-        octa[7] = max(tensor(0.1), randn_like(octa[7]) / 2)
+        min_width = 0.1
 
-        # for i in range(0,2): octa[i] = zeros_like(octa[i])
-        # for i in range(2,4): octa[i] = init_band_center(octa[i])
-        # for i in range(4,6): octa[i] = ones_like(octa[i])
-        # for i in range(6,8): octa[i] = init_band_width(octa[i])
+        octa[4] = init_rand_width(octa[4], min_width)
+        octa[5] = init_rand_width(octa[5], min_width)
+        octa[6] = init_rand_width(octa[6], min_width)
+        octa[7] = init_rand_width(octa[7], min_width)
 
         octa = tighten_octa(octa)
 
@@ -286,12 +287,5 @@ class UVXY(ERModel):
             if "y" in chunk: wy[..., s] = 1.
             if "u" in chunk: wu[..., s] = 1.
             if "v" in chunk: wv[..., s] = 1.
-
-        if is_cuda_available():
-            # TODO get device from model?
-            wx = wx.cuda()
-            wy = wy.cuda()
-            wu = wu.cuda()
-            wv = wv.cuda()
 
         return wx, wy, wu, wv
