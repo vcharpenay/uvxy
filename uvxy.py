@@ -1,6 +1,6 @@
 from pykeen.nn import Interaction, Embedding
 from pykeen.models import ERModel
-from torch import FloatTensor, rand_like, randn_like, min, max, where, zeros, ones_like, zeros_like, abs, sigmoid, tensor, cat
+from torch import FloatTensor, rand_like, randn_like, min, max, where, zeros, ones_like, zeros_like, abs, sigmoid, tensor, cat, stack
 from torch.nn.init import xavier_uniform_
 from torch.nn.functional import normalize
 from torch.cuda import is_available as is_cuda_available
@@ -30,14 +30,7 @@ def constrain_att(a):
     """
     Normalize attention weights (restricted to be positive), per constraint.
     """
-    a = max(tensor(0), a)
-
-    a = [
-        normalize(ai, dim=-1)
-        for ai in a.tensor_split(4, dim=-1)
-    ]
-
-    return cat(a, dim=-1) 
+    return normalize(abs(a), dim=-1) 
 
 def tighten_octa(octa):
     """
@@ -114,7 +107,7 @@ class UVXYInteraction(Interaction):
 
         self.entity_shape = ("d",)
         self.relation_shape = \
-            ("e", "f",) if with_attention_weights else ("e",)
+            ("e", ("f", "g"),) if with_attention_weights else ("e",)
 
         self.p = p
         self.with_attention_weights = with_attention_weights
@@ -125,15 +118,15 @@ class UVXYInteraction(Interaction):
             else constraint_mask
 
     def _prepare_octa(self, r):
-        if self.with_attention_weights: octa, a = r
+        if self.with_attention_weights: octa, _ = r
         else: octa = r
 
         return octa.tensor_split(8, dim=-1)
         
     def _prepare_att(self, r):
         if self.with_attention_weights:
-            octa, a = r
-            return a.tensor_split(4, dim=-1)
+            _, a = r            
+            return (a[..., i, :] for i in range(4))
         else:
             return 1., 1., 1., 1.
 
@@ -154,9 +147,18 @@ class UVXYInteraction(Interaction):
         distu = wu * self._dist(u, cu, du)
         distv = wv * self._dist(v, cv, dv)
 
+        if distx.size(1) == 1: distx = distx.tile((distu.size(1), 1))
+        if disty.size(1) == 1: disty = disty.tile((distu.size(1), 1))
+
         ax, ay, au, av = self._prepare_att(r)
 
-        dist = ax * distx + ay * disty + au * distu + av * distv
+        dist = cat((
+            ax * distx,
+            ay * disty,
+            au * distu,
+            av * distv
+        ), dim=-1)
+
         return -dist.norm(p=self.p, dim=-1)
 
     def forward(self, h, r, t) -> FloatTensor:
@@ -199,16 +201,17 @@ class UVXY(ERModel):
         r_kwargs = [
             dict(
                 embedding_dim=embedding_dim * 8,
-                initializer=self._init_octa,
-                constrainer=self._constrain_octa
+                # TODO better results without proper init?
+                # initializer=self._init_octa,
+                # constrainer=self._constrain_octa
             )
         ]
 
         if with_attention_weights:
             r_kwargs.append(
                 dict(
-                    embedding_dim=embedding_dim * 4,
-                    initializer=ones_like, # TODO in-place
+                    shape=(4, embedding_dim),
+                    initializer=xavier_uniform_,
                     constrainer=constrain_att
                 )
             )
